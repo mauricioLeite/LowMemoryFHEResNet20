@@ -32,7 +32,7 @@ else()
     message(FATAL_ERROR "PACKAGE OpenFHE NOT FOUND")
 endif ()
 
-set( CMAKE_CXX_FLAGS ${OpenFHE_CXX_FLAGS} )
+set( CMAKE_CXX_FLAGS "${OpenFHE_CXX_FLAGS} -Wno-stringop-overflow" )
 
 include_directories( ${OPENMP_INCLUDES} )
 include_directories( ${OpenFHE_INCLUDE} )
