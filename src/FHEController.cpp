@@ -6,8 +6,8 @@
 const BigInteger QBFVInit = BigInteger(1) << 60;
 BigInteger Q = BigInteger(1) << 47;
 BigInteger Bigq = BigInteger(1) << 47;
-BigInteger PInput = BigInteger(4096);
-BigInteger POutput = BigInteger(4096);
+BigInteger PInput = BigInteger(4);
+BigInteger POutput = BigInteger(4);
 
 void FHEController::generate_context(bool serialize) {
     CCParams<CryptoContextCKKSRNS> parameters;
@@ -126,7 +126,7 @@ void FHEController::generate_context(int log_ring, int log_scale, int log_primes
     parameters.SetScalingTechnique(FIXEDAUTO);
     parameters.SetFirstModSize(firstMod);
 
-    uint32_t approxBootstrapDepth = 4 + 4; //During EvalRaise, Chebyshev, DoubleAngle
+    //uint32_t approxBootstrapDepth = 4 + 4; //During EvalRaise, Chebyshev, DoubleAngle
 
     levelsUsedBeforeBootstrap = get_relu_depth(relu_deg) + 3;
 
@@ -136,11 +136,19 @@ void FHEController::generate_context(int log_ring, int log_scale, int log_primes
     write_to_file("../" + parameters_folder + "/relu_degree.txt", to_string(relu_deg));
     write_to_file("../" + parameters_folder + "/level_budget.txt", to_string(level_budget[0]) + "," + to_string(level_budget[1]));
 
-    circuit_depth = 10 + levelsUsedBeforeBootstrap +
-                    FHECKKSRNS::GetBootstrapDepth(approxBootstrapDepth, level_budget, SPARSE_TERNARY);
+    uint64_t scaleTHI = 32;
+    size_t order = 1;
+    std::function<int64_t(int64_t)> func = [](int64_t x) { if (x <= 0) return 0 % POutput.ConvertToInt(); else return x % POutput.ConvertToInt(); };
+    std::vector<std::complex<double>> coeffcomp = GetHermiteTrigCoefficients(func, PInput.ConvertToInt(), order, scaleTHI);
+
+    uint32_t FBTDepth = FHECKKSRNS::GetFBTDepth(level_budget, coeffcomp, PInput, order, SPARSE_TERNARY);
+
+    circuit_depth = 5 + levelsUsedBeforeBootstrap + FBTDepth;
 
     cout << endl << "Ciphertexts depth: " << circuit_depth << ", available multiplications: "
          << levelsUsedBeforeBootstrap - 2 << endl;
+
+    cout << "FBTDepth: " << FBTDepth << endl;
 
     parameters.SetMultiplicativeDepth(circuit_depth);
 
@@ -244,11 +252,17 @@ void FHEController::load_context(bool verbose) {
 
     if (verbose) cout << "CtoS: " << level_budget[0] << ", StoC: " << level_budget[1] << endl;
 
-    uint32_t approxBootstrapDepth = 4 + 4;  
+    //uint32_t approxBootstrapDepth = 4 + 4;  
 
     uint32_t levelsUsedBeforeBootstrap = get_relu_depth(relu_degree) + 3;
 
-    circuit_depth = levelsUsedBeforeBootstrap + FHECKKSRNS::GetBootstrapDepth(approxBootstrapDepth, level_budget, SPARSE_TERNARY);
+    uint64_t scaleTHI = 32;
+    size_t order = 1;
+    std::function<int64_t(int64_t)> func = [](int64_t x) { if (x <= 0) return 0 % POutput.ConvertToInt(); else return x % POutput.ConvertToInt(); };
+    std::vector<std::complex<double>> coeffcomp = GetHermiteTrigCoefficients(func, PInput.ConvertToInt(), order, scaleTHI);
+
+	    circuit_depth = 1 + levelsUsedBeforeBootstrap +
+    			FHECKKSRNS::GetFBTDepth(level_budget, coeffcomp, PInput, order, SPARSE_TERNARY);
 
     if (verbose) cout << "Circuit depth: " << circuit_depth << ", available multiplications: " << levelsUsedBeforeBootstrap - 2 << endl;
 
@@ -506,17 +520,20 @@ Ptxt FHEController::decrypt(const Ctxt &c) {
     return p;
 }
 
-vector<double> FHEController::decrypt_tovector(const Ctxt &c, int slots) {
+vector<int64_t> FHEController::decrypt_tovector(const Ctxt &c, int slots) {
     if (slots == 0) {
         slots = num_slots;
     }
 
-    Ptxt p;
-    context->Decrypt(key_pair.secretKey, c, &p);
-    p->SetSlots(slots);
-    p->SetLength(slots);
-    vector<double> vec = p->GetRealPackedValue();
-    return vec;
+    //Ptxt p;
+    //context->Decrypt(key_pair.secretKey, c, &p);
+    auto ep = SchemeletRLWEMP::GetElementParams(key_pair.secretKey, circuit_depth - (levelsUsedBeforeBootstrap > 0));
+    auto polys = SchemeletRLWEMP::ConvertCKKSToRLWE(c, Q);
+    return SchemeletRLWEMP::DecryptCoeff(polys, Q, POutput, key_pair.secretKey, ep, slots, slots);
+    //p->SetSlots(slots);
+    //p->SetLength(slots);
+    //vector<double> vec = p->GetRealPackedValue();
+    //return vec;
 }
 
 /*
@@ -535,12 +552,12 @@ Ctxt FHEController::mult(const Ctxt &c, const Ptxt& p) {
     return context->EvalMult(c, p);
 }
 
-Ctxt FHEController::bootstrap(const Ctxt &c, bool timing) {
+Ctxt FHEController::func_bootstrap(const Ctxt &c, double scale, bool timing) {
         cout << "You are bootstrapping with remaining levels! You are at " << to_string(c->GetLevel()) << "/" << circuit_depth - 2 << endl;
     if (static_cast<int>(c->GetLevel()) + 2 < circuit_depth && timing) {
         cout << "You are bootstrapping with remaining levels! You are at " << to_string(c->GetLevel()) << "/" << circuit_depth - 2 << endl;
     }
-
+    Ctxt ctxt = mult(c, 1/scale);
 
     auto start = start_time();
 
@@ -550,8 +567,50 @@ Ctxt FHEController::bootstrap(const Ctxt &c, bool timing) {
     std::vector<std::complex<double>> coeffcomp = GetHermiteTrigCoefficients(func, PInput.ConvertToInt(), order, scaleTHI);
     auto ep = SchemeletRLWEMP::GetElementParams(key_pair.secretKey, circuit_depth - (levelsUsedBeforeBootstrap > 0));
 
-    Ctxt res = context->EvalFBT(c, coeffcomp, PInput.GetMSB() - 1, ep->GetModulus(), scaleTHI, 0, order);
+    Ctxt res = context->EvalFBT(ctxt, coeffcomp, PInput.GetMSB() - 1, ep->GetModulus(), scaleTHI, 0, order);
     //Ctxt res = context->EvalBootstrap(c);
+
+    if (timing) {
+        print_duration(start, "Bootstrapping " + to_string(c->GetSlots()) + " slots");
+    }
+
+    return res;
+}
+
+Ctxt FHEController::func_bootstrap(const Ctxt &c, double scale, int precision, bool timing) {
+    if (static_cast<int>(c->GetLevel()) + 2 < circuit_depth) {
+        cout << "You are bootstrapping with remaining levels! You are at " << to_string(c->GetLevel()) << "/" << circuit_depth - 2 << endl;
+    }
+    Ctxt ctxt = mult(c, 1/scale);
+
+    auto start = start_time();
+
+    uint64_t scaleTHI = 32;
+    size_t order = 1;
+    std::function<int64_t(int64_t)> func = [](int64_t x) { if (x <= 0) return 0 % POutput.ConvertToInt(); else return x % POutput.ConvertToInt(); };
+    std::vector<std::complex<double>> coeffcomp = GetHermiteTrigCoefficients(func, PInput.ConvertToInt(), order, scaleTHI);
+    auto ep = SchemeletRLWEMP::GetElementParams(key_pair.secretKey, circuit_depth - (levelsUsedBeforeBootstrap > 0));
+
+    Ctxt res = context->EvalFBT(ctxt, coeffcomp, PInput.GetMSB() - 1, ep->GetModulus(), scaleTHI, 0, order);
+    //Ctxt res = context->EvalBootstrap(c, 2, precision);
+
+    if (timing) {
+        print_duration(start, "Double Bootstrapping " + to_string(c->GetSlots()) + " slots");
+    }
+
+
+    return res;
+}
+
+Ctxt FHEController::bootstrap(const Ctxt &c, bool timing) {
+    if (static_cast<int>(c->GetLevel()) + 2 < circuit_depth && timing) {
+        cout << "You are bootstrapping with remaining levels! You are at " << to_string(c->GetLevel()) << "/" << circuit_depth - 2 << endl;
+    }
+
+
+    auto start = start_time();
+
+    Ctxt res = context->EvalBootstrap(c);
 
     if (timing) {
         print_duration(start, "Bootstrapping " + to_string(c->GetSlots()) + " slots");
@@ -567,14 +626,7 @@ Ctxt FHEController::bootstrap(const Ctxt &c, int precision, bool timing) {
 
     auto start = start_time();
 
-    uint64_t scaleTHI = 32;
-    size_t order = 1;
-    std::function<int64_t(int64_t)> func = [](int64_t x) { if (x <= 0) return 0 % POutput.ConvertToInt(); else return x % POutput.ConvertToInt(); };
-    std::vector<std::complex<double>> coeffcomp = GetHermiteTrigCoefficients(func, PInput.ConvertToInt(), order, scaleTHI);
-    auto ep = SchemeletRLWEMP::GetElementParams(key_pair.secretKey, circuit_depth - (levelsUsedBeforeBootstrap > 0));
-
-    Ctxt res = context->EvalFBT(c, coeffcomp, PInput.GetMSB() - 1, ep->GetModulus(), scaleTHI, 0, order);
-    //Ctxt res = context->EvalBootstrap(c, 2, precision);
+    Ctxt res = context->EvalBootstrap(c, 2, precision);
 
     if (timing) {
         print_duration(start, "Double Bootstrapping " + to_string(c->GetSlots()) + " slots");

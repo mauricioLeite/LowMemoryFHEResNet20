@@ -72,7 +72,7 @@ public:
     Ctxt encrypt(const vector<double>& vec, int level = 0, int plaintext_num_slots = 0);
     Ctxt encrypt_ptxt(const Ptxt& p);
     Ptxt decrypt(const Ctxt& c);
-    vector<double> decrypt_tovector(const Ctxt& c, int slots);
+    vector<int64_t> decrypt_tovector(const Ctxt& c, int slots);
 
 
     /*
@@ -81,6 +81,8 @@ public:
     Ctxt add(const Ctxt& c1, const Ctxt& c2);
     Ctxt mult(const Ctxt& c, double d);
     Ctxt mult(const Ctxt& c, const Ptxt& p);
+    Ctxt func_bootstrap(const Ctxt& c, double scale, bool timing = false);
+    Ctxt func_bootstrap(const Ctxt& c, double scale, int precision, bool timing = false);
     Ctxt bootstrap(const Ctxt& c, bool timing = false);
     Ctxt bootstrap(const Ctxt& c, int precision, bool timing = false);
     Ctxt relu(const Ctxt& c, double scale, bool timing = false);

@@ -233,7 +233,7 @@ Ctxt final_layer(const Ctxt& in) {
         controller.print(res, 10, "Output: ");
     }
 
-    vector<double> clear_result = controller.decrypt_tovector(res, 10);
+    vector<int64_t> clear_result = controller.decrypt_tovector(res, 10);
 
     //Index of the max element
     auto max_element_iterator = std::max_element(clear_result.begin(), clear_result.end());
@@ -286,7 +286,7 @@ Ctxt layer3(const Ctxt& in) {
     fullpackSx = controller.relu(fullpackSx, scaleSx, timing);
     fullpackSx = controller.convbn3(fullpackSx, 7, 2, scaleDx, timing);
     Ctxt res1 = controller.add(fullpackSx, fullpackDx);
-    res1 = controller.bootstrap(res1, timing);
+    res1 = controller.func_bootstrap(res1, scaleDx, timing);
     //res1 = controller.relu(res1, scaleDx, timing);
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer3 - Block 1---" << endl;
@@ -298,14 +298,14 @@ Ctxt layer3(const Ctxt& in) {
     start = start_time();
     Ctxt res2;
     res2 = controller.convbn3(res1, 8, 1, scale, timing);
-    res2 = controller.bootstrap(res2, timing);
+    res2 = controller.func_bootstrap(res2, scale, timing);
     //res2 = controller.relu(res2, scale, timing);
 
     scale = 0.33;
 
     res2 = controller.convbn3(res2, 8, 2, scale, timing);
     res2 = controller.add(res2, controller.mult(res1, scale));
-    res2 = controller.bootstrap(res2, timing);
+    res2 = controller.func_bootstrap(res2, scale, timing);
     //res2 = controller.relu(res2, scale, timing);
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer3 - Block 2---" << endl;
@@ -317,14 +317,14 @@ Ctxt layer3(const Ctxt& in) {
     Ctxt res3;
 
     res3 = controller.convbn3(res2, 9, 1, scale, timing);
-    res3 = controller.bootstrap(res3, timing);
+    res3 = controller.func_bootstrap(res3, scale, timing);
     //res3 = controller.relu(res3, scale, timing);
 
     scale = 0.1;
 
     res3 = controller.convbn3(res3, 9, 2, scale, timing);
     res3 = controller.add(res3, controller.mult(res2, scale));
-    res3 = controller.bootstrap(res3, timing);
+    res3 = controller.func_bootstrap(res3, scale, timing);
     //res3 = controller.relu(res3, scale, timing);
     res3 = controller.bootstrap(res3, timing);
 
@@ -366,14 +366,14 @@ Ctxt layer2(const Ctxt& in) {
     controller.load_bootstrapping_and_rotation_keys("rotations-layer2.bin", 8192, verbose > 1);
 
     controller.num_slots = 8192;
-    fullpackSx = controller.bootstrap(fullpackSx, timing);
+    fullpackSx = controller.func_bootstrap(fullpackSx, scaleSx, timing);
 
     //fullpackSx = controller.relu(fullpackSx, scaleSx, timing);
 
     //I use the scale of the right branch since they will be added together
     fullpackSx = controller.convbn2(fullpackSx, 4, 2, scaleDx, timing);
     Ctxt res1 = controller.add(fullpackSx, fullpackDx);
-    res1 = controller.bootstrap(res1, timing);
+    res1 = controller.func_bootstrap(res1, scaleDx, timing);
     //res1 = controller.relu(res1, scaleDx, timing);
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer2 - Block 1---" << endl;
@@ -384,14 +384,14 @@ Ctxt layer2(const Ctxt& in) {
     start = start_time();
     Ctxt res2;
     res2 = controller.convbn2(res1, 5, 1, scale, timing);
-    res2 = controller.bootstrap(res2, timing);
+    res2 = controller.func_bootstrap(res2, scale, timing);
     //res2 = controller.relu(res2, scale, timing);
 
     scale = 0.37;
 
     res2 = controller.convbn2(res2, 5, 2, scale, timing);
     res2 = controller.add(res2, controller.mult(res1, scale));
-    res2 = controller.bootstrap(res2, timing);
+    res2 = controller.func_bootstrap(res2, scale, timing);
     //res2 = controller.relu(res2, scale, timing);
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer2 - Block 2---" << endl;
@@ -402,14 +402,14 @@ Ctxt layer2(const Ctxt& in) {
     start = start_time();
     Ctxt res3;
     res3 = controller.convbn2(res2, 6, 1, scale, timing);
-    res3 = controller.bootstrap(res3, timing);
+    res3 = controller.func_bootstrap(res3, scale, timing);
     //res3 = controller.relu(res3, scale, timing);
   
     scale = 0.25;
 
     res3 = controller.convbn2(res3, 6, 2, scale, timing);
     res3 = controller.add(res3, controller.mult(res2, scale));
-    res3 = controller.bootstrap(res3, timing);
+    res3 = controller.func_bootstrap(res3, scale, timing);
     //res3 = controller.relu(res3, scale, timing);
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer2 - Block 3---" << endl;
@@ -426,14 +426,14 @@ Ctxt layer1(const Ctxt& in) {
     auto start = start_time();
     Ctxt res1;
     res1 = controller.convbn(in, 1, 1, scale, timing);
-    res1 = controller.bootstrap(res1, timing);
+    res1 = controller.func_bootstrap(res1, scale, timing);
     //res1 = controller.relu(res1, scale, timing);
 
     scale = 0.52;
 
     res1 = controller.convbn(res1, 1, 2, scale, timing);
     res1 = controller.add(res1, controller.mult(in, scale));
-    res1 = controller.bootstrap(res1, timing);
+    res1 = controller.func_bootstrap(res1, scale, timing);
     //res1 = controller.relu(res1, scale, timing);
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer1 - Block 1---" << endl;
@@ -445,14 +445,14 @@ Ctxt layer1(const Ctxt& in) {
     start = start_time();
     Ctxt res2;
     res2 = controller.convbn(res1, 2, 1, scale, timing);
-    res2 = controller.bootstrap(res2, timing);
+    res2 = controller.func_bootstrap(res2, scale, timing);
     //res2 = controller.relu(res2, scale, timing);
 
     scale = 0.36;
 
     res2 = controller.convbn(res2, 2, 2, scale, timing);
     res2 = controller.add(res2, controller.mult(res1, scale));
-    res2 = controller.bootstrap(res2, timing);
+    res2 = controller.func_bootstrap(res2, scale, timing);
     //res2 = controller.relu(res2, scale, timing);
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer1 - Block 2---" << endl;
@@ -463,14 +463,14 @@ Ctxt layer1(const Ctxt& in) {
     start = start_time();
     Ctxt res3;
     res3 = controller.convbn(res2, 3, 1, scale, timing);
-    res3 = controller.bootstrap(res3, timing);
+    res3 = controller.func_bootstrap(res3, scale, timing);
     //res3 = controller.relu(res3, scale, timing);
 
     scale = 0.42;
   
     res3 = controller.convbn(res3, 3, 2, scale, timing);
     res3 = controller.add(res3, controller.mult(res2, scale));
-    res3 = controller.bootstrap(res3, timing);
+    res3 = controller.func_bootstrap(res3, scale, timing);
     //res3 = controller.relu(res3, scale, timing);
 
     if (verbose > 1) print_duration(start, "Total");
