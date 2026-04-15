@@ -12,6 +12,9 @@
 #include "cryptocontext-ser.h"
 #include "key/key-ser.h"
 #include <thread>
+#include "schemelet/rlwe-mp.h"
+#include "math/hermite.h"
+#include <functional>
 
 #include "Utils.h"
 
@@ -62,6 +65,8 @@ public:
     /*
      * CKKS Encoding/Decoding/Encryption/Decryption
      */
+    Ptxt encode_int(const vector<int64_t>& vec, int level, int plaintext_num_slots);
+    Ctxt encrypt_int(const vector<int64_t>& vec, int level = 0, int plaintext_num_slots = 0);
     Ptxt encode(const vector<double>& vec, int level, int plaintext_num_slots);
     Ptxt encode(double val, int level, int plaintext_num_slots);
     Ctxt encrypt(const vector<double>& vec, int level = 0, int plaintext_num_slots = 0);
@@ -130,6 +135,7 @@ public:
     Ptxt mask_mod(int n, int level, double custom_val);
 
     void bootstrap_precision(const Ctxt& c);
+    int32_t levelsUsedBeforeBootstrap;
 
     int relu_degree = 119;
     string parameters_folder = "NO_FOLDER";

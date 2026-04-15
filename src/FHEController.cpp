@@ -3,6 +3,11 @@
 //
 
 #include "FHEController.h"
+const BigInteger QBFVInit = BigInteger(1) << 60;
+BigInteger Q = BigInteger(1) << 47;
+BigInteger Bigq = BigInteger(1) << 47;
+BigInteger PInput = BigInteger(4096);
+BigInteger POutput = BigInteger(4096);
 
 void FHEController::generate_context(bool serialize) {
     CCParams<CryptoContextCKKSRNS> parameters;
@@ -10,15 +15,16 @@ void FHEController::generate_context(bool serialize) {
     num_slots = 1 << 14;
 
     parameters.SetSecretKeyDist(SPARSE_TERNARY);
-    parameters.SetSecurityLevel(lbcrypto::HEStd_128_classic);
-    //parameters.SetSecurityLevel(lbcrypto::HEStd_NotSet);
+    //parameters.SetSecurityLevel(lbcrypto::HEStd_128_classic);
+    parameters.SetSecurityLevel(lbcrypto::HEStd_NotSet);
     parameters.SetNumLargeDigits(3); //d_{num} Se lo riduci, aumenti il logQP, se lo aumenti, aumenti memori
     parameters.SetRingDim(1 << 16);
     parameters.SetBatchSize(num_slots);
 
     level_budget = {4, 4};
 
-    ScalingTechnique rescaleTech = FLEXIBLEAUTO;
+    //ScalingTechnique rescaleTech = FLEXIBLEAUTO;
+    ScalingTechnique rescaleTech = FIXEDAUTO;
 
     //55, 56 fa un bootstrap con precisione di 8.6
     int dcrtBits               = 47;
@@ -101,7 +107,8 @@ void FHEController::generate_context(int log_ring, int log_scale, int log_primes
     num_slots = 1 << 14;
 
     parameters.SetSecretKeyDist(SPARSE_TERNARY);
-    parameters.SetSecurityLevel(lbcrypto::HEStd_128_classic);
+    //parameters.SetSecurityLevel(lbcrypto::HEStd_128_classic);
+    parameters.SetSecurityLevel(lbcrypto::HEStd_NotSet);
     parameters.SetNumLargeDigits(digits_hks);
     parameters.SetRingDim(1 << log_ring);
     parameters.SetBatchSize(num_slots);
@@ -115,12 +122,13 @@ void FHEController::generate_context(int log_ring, int log_scale, int log_primes
     int firstMod = log_scale;
 
     parameters.SetScalingModSize(dcrtBits);
-    parameters.SetScalingTechnique(FLEXIBLEAUTO);
+    //parameters.SetScalingTechnique(FLEXIBLEAUTO);
+    parameters.SetScalingTechnique(FIXEDAUTO);
     parameters.SetFirstModSize(firstMod);
 
     uint32_t approxBootstrapDepth = 4 + 4; //During EvalRaise, Chebyshev, DoubleAngle
 
-    uint32_t levelsUsedBeforeBootstrap = get_relu_depth(relu_deg) + 3;
+    levelsUsedBeforeBootstrap = get_relu_depth(relu_deg) + 3;
 
     //<relu_degree> is at class-level, <relu_deg> is the input of the function
     relu_degree = relu_deg;
@@ -128,7 +136,7 @@ void FHEController::generate_context(int log_ring, int log_scale, int log_primes
     write_to_file("../" + parameters_folder + "/relu_degree.txt", to_string(relu_deg));
     write_to_file("../" + parameters_folder + "/level_budget.txt", to_string(level_budget[0]) + "," + to_string(level_budget[1]));
 
-    circuit_depth = levelsUsedBeforeBootstrap +
+    circuit_depth = 10 + levelsUsedBeforeBootstrap +
                     FHECKKSRNS::GetBootstrapDepth(approxBootstrapDepth, level_budget, SPARSE_TERNARY);
 
     cout << endl << "Ciphertexts depth: " << circuit_depth << ", available multiplications: "
@@ -255,14 +263,16 @@ void FHEController::test_context() {
     num_slots = 1 << 14;
 
     parameters.SetSecretKeyDist(SPARSE_TERNARY);
-    parameters.SetSecurityLevel(lbcrypto::HEStd_128_classic);
+    //parameters.SetSecurityLevel(lbcrypto::HEStd_128_classic);
+    parameters.SetSecurityLevel(lbcrypto::HEStd_NotSet);
     parameters.SetNumLargeDigits(2);
     parameters.SetRingDim(1 << 16);
     parameters.SetBatchSize(num_slots);
 
     level_budget = {3, 3};
 
-    ScalingTechnique rescaleTech = FLEXIBLEAUTO;
+    //ScalingTechnique rescaleTech = FLEXIBLEAUTO;
+    ScalingTechnique rescaleTech = FIXEDAUTO;
     int dcrtBits               = 47;
     int firstMod               = 52;
 
@@ -294,7 +304,14 @@ void FHEController::test_context() {
 }
 
 void FHEController::generate_bootstrapping_keys(int bootstrap_slots) {
-    context->EvalBootstrapSetup(level_budget, {0, 0}, bootstrap_slots);
+    uint64_t scaleTHI = 32;
+    size_t order = 1;
+    std::function<int64_t(int64_t)> func = [](int64_t x) { if (x <= 0) return 0 % POutput.ConvertToInt(); else return x % POutput.ConvertToInt(); };
+    cout << "PInput: " << PInput.ConvertToInt() << endl;
+    std::vector<std::complex<double>> coeffcomp = GetHermiteTrigCoefficients(func, PInput.ConvertToInt(), order, scaleTHI);
+    context->EvalFBTSetup(coeffcomp, bootstrap_slots, PInput, POutput, Bigq, key_pair.publicKey, {0, 0}, level_budget,
+                         levelsUsedBeforeBootstrap, 0, order);
+    //context->EvalBootstrapSetup(level_budget, {0, 0}, bootstrap_slots);
     context->EvalBootstrapKeyGen(key_pair.secretKey, bootstrap_slots);
 }
 
@@ -336,7 +353,14 @@ void FHEController::load_bootstrapping_and_rotation_keys(const string& filename,
 
     auto start = start_time();
 
-    context->EvalBootstrapSetup(level_budget, {0, 0}, bootstrap_slots);
+    uint64_t scaleTHI = 32;
+    size_t order = 1;
+    std::function<int64_t(int64_t)> func = [](int64_t x) { if (x <= 0) return 0 % POutput.ConvertToInt(); else return x % POutput.ConvertToInt(); };
+    std::vector<std::complex<double>> coeffcomp = GetHermiteTrigCoefficients(func, PInput.ConvertToInt(), order, scaleTHI);
+    context->EvalFBTSetup(coeffcomp, bootstrap_slots, PInput, POutput, Bigq, key_pair.publicKey, {0, 0}, level_budget,
+                         levelsUsedBeforeBootstrap, 0, order);
+
+    //context->EvalBootstrapSetup(level_budget, {0, 0}, bootstrap_slots);
 
     if (verbose)  cout << "(1/2) Bootstrapping precomputations completed!" << endl;
 
@@ -407,6 +431,18 @@ void FHEController::clear_context(int bootstrapping_key_slots) {
 /*
  * CKKS Encoding/Decoding/Encryption/Decryption
  */
+
+Ptxt FHEController::encode_int(const vector<int64_t> &vec, int level, int plaintext_num_slots) {
+    if (plaintext_num_slots == 0) {
+        plaintext_num_slots = num_slots;
+    }
+
+    std::vector<double> doubleVec(vec.begin(), vec.end());
+    Ptxt p = context->MakeCKKSPackedPlaintext(doubleVec, 1, level, nullptr, plaintext_num_slots);
+    p->SetLength(plaintext_num_slots);
+    return p;
+}
+
 Ptxt FHEController::encode(const vector<double> &vec, int level, int plaintext_num_slots) {
     if (plaintext_num_slots == 0) {
         plaintext_num_slots = num_slots;
@@ -430,6 +466,24 @@ Ptxt FHEController::encode(double val, int level, int plaintext_num_slots) {
     Ptxt p = context->MakeCKKSPackedPlaintext(vec, 1, level, nullptr, plaintext_num_slots);
     p->SetLength(plaintext_num_slots);
     return p;
+}
+
+Ctxt FHEController::encrypt_int(const vector<int64_t> &vec, int level, int plaintext_num_slots) {
+    if (plaintext_num_slots == 0) {
+        plaintext_num_slots = num_slots;
+    }
+    auto ep = SchemeletRLWEMP::GetElementParams(key_pair.secretKey, circuit_depth - (levelsUsedBeforeBootstrap > 0));
+    auto ctxtBFV = SchemeletRLWEMP::EncryptCoeff(vec, QBFVInit, PInput, key_pair.secretKey, ep);
+    SchemeletRLWEMP::ModSwitch(ctxtBFV, Q, QBFVInit);
+
+    auto ctxt = SchemeletRLWEMP::ConvertRLWEToCKKS(*context, ctxtBFV, key_pair.publicKey, Bigq, 1 << 14,
+                                                   circuit_depth - (levelsUsedBeforeBootstrap > 0));
+    //context->ModReduceInPlace(ctxt);
+
+    return ctxt;
+    //Ptxt p = encode_int(vec, level, plaintext_num_slots);
+
+    //return context->Encrypt(p, key_pair.publicKey);
 }
 
 Ctxt FHEController::encrypt(const vector<double> &vec, int level, int plaintext_num_slots) {
@@ -482,6 +536,7 @@ Ctxt FHEController::mult(const Ctxt &c, const Ptxt& p) {
 }
 
 Ctxt FHEController::bootstrap(const Ctxt &c, bool timing) {
+        cout << "You are bootstrapping with remaining levels! You are at " << to_string(c->GetLevel()) << "/" << circuit_depth - 2 << endl;
     if (static_cast<int>(c->GetLevel()) + 2 < circuit_depth && timing) {
         cout << "You are bootstrapping with remaining levels! You are at " << to_string(c->GetLevel()) << "/" << circuit_depth - 2 << endl;
     }
@@ -489,7 +544,14 @@ Ctxt FHEController::bootstrap(const Ctxt &c, bool timing) {
 
     auto start = start_time();
 
-    Ctxt res = context->EvalBootstrap(c);
+    uint64_t scaleTHI = 32;
+    size_t order = 1;
+    std::function<int64_t(int64_t)> func = [](int64_t x) { if (x <= 0) return 0 % POutput.ConvertToInt(); else return x % POutput.ConvertToInt(); };
+    std::vector<std::complex<double>> coeffcomp = GetHermiteTrigCoefficients(func, PInput.ConvertToInt(), order, scaleTHI);
+    auto ep = SchemeletRLWEMP::GetElementParams(key_pair.secretKey, circuit_depth - (levelsUsedBeforeBootstrap > 0));
+
+    Ctxt res = context->EvalFBT(c, coeffcomp, PInput.GetMSB() - 1, ep->GetModulus(), scaleTHI, 0, order);
+    //Ctxt res = context->EvalBootstrap(c);
 
     if (timing) {
         print_duration(start, "Bootstrapping " + to_string(c->GetSlots()) + " slots");
@@ -505,7 +567,14 @@ Ctxt FHEController::bootstrap(const Ctxt &c, int precision, bool timing) {
 
     auto start = start_time();
 
-    Ctxt res = context->EvalBootstrap(c, 2, precision);
+    uint64_t scaleTHI = 32;
+    size_t order = 1;
+    std::function<int64_t(int64_t)> func = [](int64_t x) { if (x <= 0) return 0 % POutput.ConvertToInt(); else return x % POutput.ConvertToInt(); };
+    std::vector<std::complex<double>> coeffcomp = GetHermiteTrigCoefficients(func, PInput.ConvertToInt(), order, scaleTHI);
+    auto ep = SchemeletRLWEMP::GetElementParams(key_pair.secretKey, circuit_depth - (levelsUsedBeforeBootstrap > 0));
+
+    Ctxt res = context->EvalFBT(c, coeffcomp, PInput.GetMSB() - 1, ep->GetModulus(), scaleTHI, 0, order);
+    //Ctxt res = context->EvalBootstrap(c, 2, precision);
 
     if (timing) {
         print_duration(start, "Double Bootstrapping " + to_string(c->GetSlots()) + " slots");
@@ -521,9 +590,9 @@ Ctxt FHEController::relu(const Ctxt &c, double scale, bool timing) {
     /*
      * Max min
      */
-    Ptxt result;
-    context->Decrypt(key_pair.secretKey, c, &result);
-    vector<double> v = result->GetRealPackedValue();
+    //Ptxt result;
+    //context->Decrypt(key_pair.secretKey, c, &result);
+    //vector<double> v = result->GetRealPackedValue();
 
     //cout << "min: " << *min_element(v.begin(), v.end()) << ", max: " << *max_element(v.begin(), v.end()) << endl;
     /*
@@ -708,6 +777,9 @@ Ctxt FHEController::convbn_initial(const Ctxt &in, double scale, bool timing) {
         for (int k = 0; k < 9; k++) {
             vector<double> values = read_values_from_file("../weights/conv1bn1-ch" +
                                                           to_string(j) + "-k" + to_string(k+1) + ".bin", scale);
+	    double normalization = 1.0 / 255.0;
+	    std::for_each(values.begin(), values.end(), [normalization](double &val) { val *= normalization; });
+
             Ptxt encoded = encode(values, in->GetLevel(), 16384);
             k_rows.push_back(context->EvalMult(c_rotations[k], encoded));
         }

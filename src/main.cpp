@@ -12,7 +12,7 @@
 
 
 void check_arguments(int argc, char *argv[]);
-vector<double> read_image(const char *filename);
+vector<int64_t> read_image(const char *filename);
 
 void executeResNet20();
 
@@ -64,7 +64,7 @@ int main(int argc, char *argv[]) {
                 controller.generate_context(16, 50, 46, 3, 5, 4, 119, true);
                 break;
             case 4:
-                controller.generate_context(16, 48, 44, 2, 4, 4, 59, true);
+                controller.generate_context(16, 40, 36, 2, 4, 4, 59, true);
                 break;
             default:
                 controller.generate_context(true);
@@ -133,12 +133,12 @@ void executeResNet20() {
     Ctxt firstLayer, resLayer1, resLayer2, resLayer3, finalRes;
 
     bool print_intermediate_values = false;
-    bool print_bootstrap_precision = false;
+    //bool print_bootstrap_precision = false;
 
-    if (verbose > 1) {
-        print_intermediate_values = true;
-        print_bootstrap_precision = true;
-    }
+    //if (verbose > 1) {
+        //print_intermediate_values = true;
+        //print_bootstrap_precision = true;
+    //}
 
     if (input_filename.empty()) {
         input_filename = "../inputs/luis.png";
@@ -147,19 +147,22 @@ void executeResNet20() {
         if (verbose >= 0) cout << "I am going to encrypt and classify " << GREEN_TEXT<< input_filename << RESET_COLOR << "." << endl;
     }
 
-    vector<double> input_image = read_image(input_filename.c_str());
+    vector<int64_t> input_image = read_image(input_filename.c_str());
 
-    Ctxt in = controller.encrypt(input_image, controller.circuit_depth - 4 - get_relu_depth(controller.relu_degree));
+    Ctxt in = controller.encrypt_int(input_image, controller.circuit_depth - 4 - get_relu_depth(controller.relu_degree));
 
     controller.load_bootstrapping_and_rotation_keys("rotations-layer1.bin", 16384, verbose > 1);
 
-    if (print_bootstrap_precision){
-        controller.bootstrap_precision(controller.encrypt(input_image, controller.circuit_depth - 2));
-    }
+    //if (print_bootstrap_precision){
+        //controller.bootstrap_precision(controller.encrypt(input_image, controller.circuit_depth - 2));
+    //}
 
     auto start = start_time();
 
     firstLayer = initial_layer(in);
+    //if (print_bootstrap_precision){
+        //controller.bootstrap_precision(controller.encrypt_int(input_image, controller.circuit_depth - 2));
+    //}
     if (print_intermediate_values) controller.print(firstLayer, 16384, "Initial layer: ");
   
     /*
@@ -204,6 +207,7 @@ Ctxt initial_layer(const Ctxt& in) {
 
     Ctxt res = controller.convbn_initial(in, scale, verbose > 1);
     res = controller.relu(res, scale, verbose > 1);
+    //controller.bootstrap(res);
 
     return res;
 }
@@ -283,7 +287,7 @@ Ctxt layer3(const Ctxt& in) {
     fullpackSx = controller.convbn3(fullpackSx, 7, 2, scaleDx, timing);
     Ctxt res1 = controller.add(fullpackSx, fullpackDx);
     res1 = controller.bootstrap(res1, timing);
-    res1 = controller.relu(res1, scaleDx, timing);
+    //res1 = controller.relu(res1, scaleDx, timing);
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer3 - Block 1---" << endl;
 
@@ -295,14 +299,14 @@ Ctxt layer3(const Ctxt& in) {
     Ctxt res2;
     res2 = controller.convbn3(res1, 8, 1, scale, timing);
     res2 = controller.bootstrap(res2, timing);
-    res2 = controller.relu(res2, scale, timing);
+    //res2 = controller.relu(res2, scale, timing);
 
     scale = 0.33;
 
     res2 = controller.convbn3(res2, 8, 2, scale, timing);
     res2 = controller.add(res2, controller.mult(res1, scale));
     res2 = controller.bootstrap(res2, timing);
-    res2 = controller.relu(res2, scale, timing);
+    //res2 = controller.relu(res2, scale, timing);
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer3 - Block 2---" << endl;
 
@@ -314,14 +318,14 @@ Ctxt layer3(const Ctxt& in) {
 
     res3 = controller.convbn3(res2, 9, 1, scale, timing);
     res3 = controller.bootstrap(res3, timing);
-    res3 = controller.relu(res3, scale, timing);
+    //res3 = controller.relu(res3, scale, timing);
 
     scale = 0.1;
 
     res3 = controller.convbn3(res3, 9, 2, scale, timing);
     res3 = controller.add(res3, controller.mult(res2, scale));
     res3 = controller.bootstrap(res3, timing);
-    res3 = controller.relu(res3, scale, timing);
+    //res3 = controller.relu(res3, scale, timing);
     res3 = controller.bootstrap(res3, timing);
 
     if (verbose > 1) print_duration(start, "Total");
@@ -364,13 +368,13 @@ Ctxt layer2(const Ctxt& in) {
     controller.num_slots = 8192;
     fullpackSx = controller.bootstrap(fullpackSx, timing);
 
-    fullpackSx = controller.relu(fullpackSx, scaleSx, timing);
+    //fullpackSx = controller.relu(fullpackSx, scaleSx, timing);
 
     //I use the scale of the right branch since they will be added together
     fullpackSx = controller.convbn2(fullpackSx, 4, 2, scaleDx, timing);
     Ctxt res1 = controller.add(fullpackSx, fullpackDx);
     res1 = controller.bootstrap(res1, timing);
-    res1 = controller.relu(res1, scaleDx, timing);
+    //res1 = controller.relu(res1, scaleDx, timing);
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer2 - Block 1---" << endl;
 
@@ -381,14 +385,14 @@ Ctxt layer2(const Ctxt& in) {
     Ctxt res2;
     res2 = controller.convbn2(res1, 5, 1, scale, timing);
     res2 = controller.bootstrap(res2, timing);
-    res2 = controller.relu(res2, scale, timing);
+    //res2 = controller.relu(res2, scale, timing);
 
     scale = 0.37;
 
     res2 = controller.convbn2(res2, 5, 2, scale, timing);
     res2 = controller.add(res2, controller.mult(res1, scale));
     res2 = controller.bootstrap(res2, timing);
-    res2 = controller.relu(res2, scale, timing);
+    //res2 = controller.relu(res2, scale, timing);
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer2 - Block 2---" << endl;
 
@@ -399,14 +403,14 @@ Ctxt layer2(const Ctxt& in) {
     Ctxt res3;
     res3 = controller.convbn2(res2, 6, 1, scale, timing);
     res3 = controller.bootstrap(res3, timing);
-    res3 = controller.relu(res3, scale, timing);
+    //res3 = controller.relu(res3, scale, timing);
   
     scale = 0.25;
 
     res3 = controller.convbn2(res3, 6, 2, scale, timing);
     res3 = controller.add(res3, controller.mult(res2, scale));
     res3 = controller.bootstrap(res3, timing);
-    res3 = controller.relu(res3, scale, timing);
+    //res3 = controller.relu(res3, scale, timing);
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer2 - Block 3---" << endl;
 
@@ -423,14 +427,14 @@ Ctxt layer1(const Ctxt& in) {
     Ctxt res1;
     res1 = controller.convbn(in, 1, 1, scale, timing);
     res1 = controller.bootstrap(res1, timing);
-    res1 = controller.relu(res1, scale, timing);
+    //res1 = controller.relu(res1, scale, timing);
 
     scale = 0.52;
 
     res1 = controller.convbn(res1, 1, 2, scale, timing);
     res1 = controller.add(res1, controller.mult(in, scale));
     res1 = controller.bootstrap(res1, timing);
-    res1 = controller.relu(res1, scale, timing);
+    //res1 = controller.relu(res1, scale, timing);
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer1 - Block 1---" << endl;
 
@@ -442,14 +446,14 @@ Ctxt layer1(const Ctxt& in) {
     Ctxt res2;
     res2 = controller.convbn(res1, 2, 1, scale, timing);
     res2 = controller.bootstrap(res2, timing);
-    res2 = controller.relu(res2, scale, timing);
+    //res2 = controller.relu(res2, scale, timing);
 
     scale = 0.36;
 
     res2 = controller.convbn(res2, 2, 2, scale, timing);
     res2 = controller.add(res2, controller.mult(res1, scale));
     res2 = controller.bootstrap(res2, timing);
-    res2 = controller.relu(res2, scale, timing);
+    //res2 = controller.relu(res2, scale, timing);
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer1 - Block 2---" << endl;
   
@@ -460,14 +464,14 @@ Ctxt layer1(const Ctxt& in) {
     Ctxt res3;
     res3 = controller.convbn(res2, 3, 1, scale, timing);
     res3 = controller.bootstrap(res3, timing);
-    res3 = controller.relu(res3, scale, timing);
+    //res3 = controller.relu(res3, scale, timing);
 
     scale = 0.42;
   
     res3 = controller.convbn(res3, 3, 2, scale, timing);
     res3 = controller.add(res3, controller.mult(res2, scale));
     res3 = controller.bootstrap(res3, timing);
-    res3 = controller.relu(res3, scale, timing);
+    //res3 = controller.relu(res3, scale, timing);
 
     if (verbose > 1) print_duration(start, "Total");
     if (verbose > 1) cout << "---End  : Layer1 - Block 3---" << endl;
@@ -550,7 +554,7 @@ void check_arguments(int argc, char *argv[]) {
 
 }
 
-vector<double> read_image(const char *filename) {
+vector<int64_t> read_image(const char *filename) {
     int width = 32;
     int height = 32;
     int channels = 3;
@@ -558,23 +562,23 @@ vector<double> read_image(const char *filename) {
 
     if (!image_data) {
         cerr << "Could not load the image in " << filename << endl;
-        return vector<double>();
+        return vector<int64_t>();
     }
 
-    vector<double> imageVector;
+    vector<int64_t> imageVector;
     imageVector.reserve(width * height * channels);
 
     for (int i = 0; i < width * height; ++i) {
         //Channel R
-        imageVector.push_back(static_cast<double>(image_data[3 * i]) / 255.0f);
+        imageVector.push_back(static_cast<int64_t>(image_data[3 * i]));
     }
     for (int i = 0; i < width * height; ++i) {
         //Channel G
-        imageVector.push_back(static_cast<double>(image_data[1 + 3 * i]) / 255.0f);
+        imageVector.push_back(static_cast<int64_t>(image_data[1 + 3 * i]));
     }
     for (int i = 0; i < width * height; ++i) {
         //Channel B
-        imageVector.push_back(static_cast<double>(image_data[2 + 3 * i]) / 255.0f);
+        imageVector.push_back(static_cast<int64_t>(image_data[2 + 3 * i]));
     }
 
     stbi_image_free(image_data);
