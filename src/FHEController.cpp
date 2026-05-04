@@ -317,20 +317,55 @@ void FHEController::test_context() {
     cout << "Test completed." << endl;
 }
 
-void FHEController::generate_bootstrapping_keys(int bootstrap_slots) {
+void FHEController::ensure_fbt_setup(uint32_t slots) {
+    auto it = bootstrap_mode_per_slots.find(slots);
+    if (it != bootstrap_mode_per_slots.end() && it->second == BootstrapMode::FBT) return;
+
+    cout << ">> [setup] Switching to FBT precomputations for " << slots << " slots..." << endl;
+    auto start = start_time();
+
     uint64_t scaleTHI = 32;
     size_t order = 1;
-    std::function<int64_t(int64_t)> func = [](int64_t x) { if (x <= 0) return 0 % POutput.ConvertToInt(); else return x % POutput.ConvertToInt(); };
-    cout << "PInput: " << PInput.ConvertToInt() << endl;
+    std::function<int64_t(int64_t)> func = [](int64_t x) {
+        if (x <= 0) return 0 % POutput.ConvertToInt();
+        else return x % POutput.ConvertToInt();
+    };
     std::vector<std::complex<double>> coeffcomp = GetHermiteTrigCoefficients(func, PInput.ConvertToInt(), order, scaleTHI);
+    context->EvalFBTSetup(coeffcomp, slots, PInput, POutput, Bigq,
+                          key_pair.publicKey, {0, 0}, level_budget,
+                          levelsUsedBeforeBootstrap, 0, order);
+    bootstrap_mode_per_slots[slots] = BootstrapMode::FBT;
 
-    // Classical bootstrap setup: initializes m_correctionFactor and m_bootPrecomMap[bootstrap_slots],
-    // both required by EvalBootstrap. Must run before EvalBootstrapKeyGen so its rotations are
-    // included in the serialized key set alongside the FBT ones.
+    print_duration(start, "<< [setup] FBT precomputations done (" + to_string(slots) + " slots)");
+}
+
+void FHEController::ensure_classical_setup(uint32_t slots) {
+    auto it = bootstrap_mode_per_slots.find(slots);
+    if (it != bootstrap_mode_per_slots.end() && it->second == BootstrapMode::Classical) return;
+
+    cout << ">> [setup] Switching to classical precomputations for " << slots << " slots..." << endl;
+    auto start = start_time();
+
+    context->EvalBootstrapSetup(level_budget, {0, 0}, slots);
+    bootstrap_mode_per_slots[slots] = BootstrapMode::Classical;
+
+    print_duration(start, "<< [setup] Classical precomputations done (" + to_string(slots) + " slots)");
+}
+
+void FHEController::generate_bootstrapping_keys(int bootstrap_slots) {
+    cout << "PInput: " << PInput.ConvertToInt() << endl;
+
+    // Classical precomputations + their bootstrap rotation keys.
     context->EvalBootstrapSetup(level_budget, {0, 0}, bootstrap_slots);
+    bootstrap_mode_per_slots[bootstrap_slots] = BootstrapMode::Classical;
+    context->EvalBootstrapKeyGen(key_pair.secretKey, bootstrap_slots);
 
-    context->EvalFBTSetup(coeffcomp, bootstrap_slots, PInput, POutput, Bigq, key_pair.publicKey, {0, 0}, level_budget,
-                         levelsUsedBeforeBootstrap, 0, order);
+    // FBT precomputations + their bootstrap rotation keys. EvalBootstrapKeyGen accumulates into
+    // the existing rotation key map, so calling it twice (once per flavor) gives us the union of
+    // the rotations needed by both. EvalFBTSetup overwrites m_bootPrecomMap[bootstrap_slots] with
+    // FBT precomps, which is fine: the classical rotations have already been added to the
+    // rotation key map in the previous EvalBootstrapKeyGen call.
+    ensure_fbt_setup(bootstrap_slots);
     context->EvalBootstrapKeyGen(key_pair.secretKey, bootstrap_slots);
 }
 
@@ -372,18 +407,13 @@ void FHEController::load_bootstrapping_and_rotation_keys(const string& filename,
 
     auto start = start_time();
 
-    uint64_t scaleTHI = 32;
-    size_t order = 1;
-    std::function<int64_t(int64_t)> func = [](int64_t x) { if (x <= 0) return 0 % POutput.ConvertToInt(); else return x % POutput.ConvertToInt(); };
-    std::vector<std::complex<double>> coeffcomp = GetHermiteTrigCoefficients(func, PInput.ConvertToInt(), order, scaleTHI);
-
-    // m_correctionFactor and m_bootPrecomMap are not serialized; they must be recomputed on each
-    // load before any classical EvalBootstrap call. Kept alongside EvalFBTSetup so both bootstrap
-    // flavors are usable from the same context.
-    context->EvalBootstrapSetup(level_budget, {0, 0}, bootstrap_slots);
-
-    context->EvalFBTSetup(coeffcomp, bootstrap_slots, PInput, POutput, Bigq, key_pair.publicKey, {0, 0}, level_budget,
-                         levelsUsedBeforeBootstrap, 0, order);
+    // m_bootPrecomMap is not serialized, so it must be repopulated on every load before any
+    // bootstrap call. EvalFBTSetup and EvalBootstrapSetup both write to the same map slot for a
+    // given slot count, so we cannot install both at load time; instead we initialize the
+    // mode-tracker to FBT here and let the bootstrap wrappers flip the precomputations on demand
+    // via ensure_fbt_setup / ensure_classical_setup. The first FBT setup also runs from here so
+    // that the FBT-driven layer 1 starts without an extra mode flip.
+    ensure_fbt_setup(bootstrap_slots);
 
     if (verbose)  cout << "(1/2) Bootstrapping precomputations completed!" << endl;
 
@@ -434,7 +464,12 @@ void FHEController::clear_bootstrapping_and_rotation_keys(int bootstrap_num_slot
 
     //FHECKKSRNS* derivedPtr = dynamic_cast<FHECKKSRNS*>(context->GetScheme()->GetFHE().get());
     //derivedPtr->m_bootPrecomMap.erase(bootstrap_num_slots);
-    
+
+    // Forget which bootstrap flavor was active for this slot count so the next time keys are
+    // loaded ensure_fbt_setup / ensure_classical_setup repopulate the precomputations from a
+    // clean slate.
+    bootstrap_mode_per_slots.erase(static_cast<uint32_t>(bootstrap_num_slots));
+
     clear_rotation_keys();
 }
 
@@ -562,6 +597,8 @@ Ctxt FHEController::mult(const Ctxt &c, const Ptxt& p) {
 }
 
 Ctxt FHEController::func_bootstrap(const Ctxt &c, double scale, bool timing) {
+    ensure_fbt_setup(c->GetSlots());
+
         cout << "You are bootstrapping with remaining levels! You are at " << to_string(c->GetLevel()) << "/" << circuit_depth - 2 << endl;
     if (static_cast<int>(c->GetLevel()) + 2 < circuit_depth && timing) {
         cout << "You are bootstrapping with remaining levels! You are at " << to_string(c->GetLevel()) << "/" << circuit_depth - 2 << endl;
@@ -587,6 +624,8 @@ Ctxt FHEController::func_bootstrap(const Ctxt &c, double scale, bool timing) {
 }
 
 Ctxt FHEController::func_bootstrap(const Ctxt &c, double scale, int precision, bool timing) {
+    ensure_fbt_setup(c->GetSlots());
+
     if (static_cast<int>(c->GetLevel()) + 2 < circuit_depth) {
         cout << "You are bootstrapping with remaining levels! You are at " << to_string(c->GetLevel()) << "/" << circuit_depth - 2 << endl;
     }
@@ -612,6 +651,8 @@ Ctxt FHEController::func_bootstrap(const Ctxt &c, double scale, int precision, b
 }
 
 Ctxt FHEController::bootstrap(const Ctxt &c, bool timing) {
+    ensure_classical_setup(c->GetSlots());
+
     if (static_cast<int>(c->GetLevel()) + 2 < circuit_depth && timing) {
         cout << "You are bootstrapping with remaining levels! You are at " << to_string(c->GetLevel()) << "/" << circuit_depth - 2 << endl;
     }
@@ -629,6 +670,8 @@ Ctxt FHEController::bootstrap(const Ctxt &c, bool timing) {
 }
 
 Ctxt FHEController::bootstrap(const Ctxt &c, int precision, bool timing) {
+    ensure_classical_setup(c->GetSlots());
+
     if (static_cast<int>(c->GetLevel()) + 2 < circuit_depth) {
         cout << "You are bootstrapping with remaining levels! You are at " << to_string(c->GetLevel()) << "/" << circuit_depth - 2 << endl;
     }

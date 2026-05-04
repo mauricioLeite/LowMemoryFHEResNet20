@@ -146,7 +146,17 @@ private:
     KeyPair<DCRTPoly> key_pair;
     vector<uint32_t> level_budget = {4, 4};
 
+    // Mode-tracked bootstrap precomputations.
+    // OpenFHE's m_bootPrecomMap[slots] can hold the precomputed plaintexts of either the classical
+    // bootstrap (EvalBootstrapSetup) or the functional bootstrap (EvalFBTSetup) but not both at the
+    // same time, since both setups overwrite the same map slot. We track which flavor is currently
+    // active per slot count and re-run the appropriate setup only when the wrappers are about to
+    // call the other flavor.
+    enum class BootstrapMode { None, FBT, Classical };
+    std::map<uint32_t, BootstrapMode> bootstrap_mode_per_slots;
 
+    void ensure_fbt_setup(uint32_t slots);
+    void ensure_classical_setup(uint32_t slots);
 };
 
 
