@@ -252,17 +252,17 @@ void FHEController::load_context(bool verbose) {
 
     if (verbose) cout << "CtoS: " << level_budget[0] << ", StoC: " << level_budget[1] << endl;
 
-    //uint32_t approxBootstrapDepth = 4 + 4;  
+    //uint32_t approxBootstrapDepth = 4 + 4;
 
-    uint32_t levelsUsedBeforeBootstrap = get_relu_depth(relu_degree) + 3;
+    levelsUsedBeforeBootstrap = get_relu_depth(relu_degree) + 3;
 
     uint64_t scaleTHI = 32;
     size_t order = 1;
     std::function<int64_t(int64_t)> func = [](int64_t x) { if (x <= 0) return 0 % POutput.ConvertToInt(); else return x % POutput.ConvertToInt(); };
     std::vector<std::complex<double>> coeffcomp = GetHermiteTrigCoefficients(func, PInput.ConvertToInt(), order, scaleTHI);
 
-	    circuit_depth = 1 + levelsUsedBeforeBootstrap +
-    			FHECKKSRNS::GetFBTDepth(level_budget, coeffcomp, PInput, order, SPARSE_TERNARY);
+    circuit_depth = 1 + levelsUsedBeforeBootstrap +
+                    FHECKKSRNS::GetFBTDepth(level_budget, coeffcomp, PInput, order, SPARSE_TERNARY);
 
     if (verbose) cout << "Circuit depth: " << circuit_depth << ", available multiplications: " << levelsUsedBeforeBootstrap - 2 << endl;
 
@@ -323,9 +323,14 @@ void FHEController::generate_bootstrapping_keys(int bootstrap_slots) {
     std::function<int64_t(int64_t)> func = [](int64_t x) { if (x <= 0) return 0 % POutput.ConvertToInt(); else return x % POutput.ConvertToInt(); };
     cout << "PInput: " << PInput.ConvertToInt() << endl;
     std::vector<std::complex<double>> coeffcomp = GetHermiteTrigCoefficients(func, PInput.ConvertToInt(), order, scaleTHI);
+
+    // Classical bootstrap setup: initializes m_correctionFactor and m_bootPrecomMap[bootstrap_slots],
+    // both required by EvalBootstrap. Must run before EvalBootstrapKeyGen so its rotations are
+    // included in the serialized key set alongside the FBT ones.
+    context->EvalBootstrapSetup(level_budget, {0, 0}, bootstrap_slots);
+
     context->EvalFBTSetup(coeffcomp, bootstrap_slots, PInput, POutput, Bigq, key_pair.publicKey, {0, 0}, level_budget,
                          levelsUsedBeforeBootstrap, 0, order);
-    //context->EvalBootstrapSetup(level_budget, {0, 0}, bootstrap_slots);
     context->EvalBootstrapKeyGen(key_pair.secretKey, bootstrap_slots);
 }
 
@@ -371,10 +376,14 @@ void FHEController::load_bootstrapping_and_rotation_keys(const string& filename,
     size_t order = 1;
     std::function<int64_t(int64_t)> func = [](int64_t x) { if (x <= 0) return 0 % POutput.ConvertToInt(); else return x % POutput.ConvertToInt(); };
     std::vector<std::complex<double>> coeffcomp = GetHermiteTrigCoefficients(func, PInput.ConvertToInt(), order, scaleTHI);
+
+    // m_correctionFactor and m_bootPrecomMap are not serialized; they must be recomputed on each
+    // load before any classical EvalBootstrap call. Kept alongside EvalFBTSetup so both bootstrap
+    // flavors are usable from the same context.
+    context->EvalBootstrapSetup(level_budget, {0, 0}, bootstrap_slots);
+
     context->EvalFBTSetup(coeffcomp, bootstrap_slots, PInput, POutput, Bigq, key_pair.publicKey, {0, 0}, level_budget,
                          levelsUsedBeforeBootstrap, 0, order);
-
-    //context->EvalBootstrapSetup(level_budget, {0, 0}, bootstrap_slots);
 
     if (verbose)  cout << "(1/2) Bootstrapping precomputations completed!" << endl;
 
@@ -491,7 +500,7 @@ Ctxt FHEController::encrypt_int(const vector<int64_t> &vec, int level, int plain
     SchemeletRLWEMP::ModSwitch(ctxtBFV, Q, QBFVInit);
 
     auto ctxt = SchemeletRLWEMP::ConvertRLWEToCKKS(*context, ctxtBFV, key_pair.publicKey, Bigq, 1 << 14,
-                                                   circuit_depth - (levelsUsedBeforeBootstrap > 0));
+                                                   level);
     //context->ModReduceInPlace(ctxt);
 
     return ctxt;

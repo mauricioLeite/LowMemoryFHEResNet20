@@ -281,9 +281,8 @@ Ctxt layer3(const Ctxt& in) {
     controller.load_bootstrapping_and_rotation_keys("rotations-layer3.bin", 4096, verbose > 1);
 
     controller.num_slots = 4096;
-    fullpackSx = controller.bootstrap(fullpackSx, timing);
+    fullpackSx = controller.func_bootstrap(fullpackSx, scaleSx, timing);
 
-    fullpackSx = controller.relu(fullpackSx, scaleSx, timing);
     fullpackSx = controller.convbn3(fullpackSx, 7, 2, scaleDx, timing);
     Ctxt res1 = controller.add(fullpackSx, fullpackDx);
     res1 = controller.func_bootstrap(res1, scaleDx, timing);
